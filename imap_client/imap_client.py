@@ -2,11 +2,10 @@ import argparse  # для разбора аргументов
 import getpass   # для возможности ввода пароля не отображая его в консоли
 
 from imaplib import IMAP4, IMAP4_SSL
+from ssl import SSLError
 import email
 from email.header import decode_header
 from typing import List
-
-import re  # для использования регулярок 
 
 DEBUG = True
 
@@ -16,34 +15,12 @@ if DEBUG:
     SERVER = 'imap.mail.ru'
 
 """
-TODO: Написать скрипт выводящий инфо о письмах в ящике
 Параметры:
  -h/--help   справка
  --ssl       разрешить использование ssl, если сервер поддерживает (по умолчанию не использовать)
  -s/--server адрес IMAP-сервера  (адрес[:порт], порт по умолчанию 143)
  -n N1 [N2]  диспазон писем
  -u/--user   Имя пользователя (пароль спросить после запуска)
-
- Оценочные:
- * вывод заголовков писем нормализованным списком с полями: кому, от кого, тема, дата, размер письма.
- * декодирование заголовков From/Subject  (?)
- * работа по защищенному соединению (SSL)
- * вывод кол-ва аттачей, их имен и размеров
- **? обязательна обработка ответов сервера, в том числе многострочных
-
- Ход работы:
- (+) 1. реализовать разборщик консольных атрибутов (обработчик входных параметров)
- ( ) 2. реализовать почтовый просмотрщик
-    (+) 2.1 Сделать ящик и включить в нем доступ по IMAP 
-    (+) 2.2 Убедиться что авторизация проходит и с сервером есть связь
-    (+) 2.3 Получить инфу о количестве писем (N)
-    (+) 2.4 Получить N писем
-    (+) 2.5 Показать N писем
-        (+) 2.5.1 Декодировать заголовок и остальные атрибуты письма
-        ( ) 2.5.2 Сделать форматирование - для корректного отображения данных в виде таблицы
-        ( ) 2.5.3 Сделать вывод вложенных документов
-        (+) 2.6 Получать вложения
-        (+) 2.7 Показывать вложения
 """
 
 def get_args():
@@ -77,20 +54,32 @@ class IMAPClient:
 
     def run(self):
         print(f"Подключение к серверу: {self.server}")
-        # TODO: добавить проверку что подключение к серверу прошло успешно
-        if self.ssl:
-            mailbox = IMAP4_SSL(self.server)
-        else:
-            mailbox = IMAP4(self.server)
+        try:
+            if self.ssl:
+                mailbox = IMAP4_SSL(self.server, port=self.port)
+            else:
+                mailbox = IMAP4(self.server, port=self.port)
+        except SSLError as er:
+            if er.reason == 'WRONG_VERSION_NUMBER':
+                print("Указан неправильный порт")
+            else:
+                print(er)
+            return
+        except IMAP4.error as er:
+            print("Ошибка подключения к серверу ({})".format(str(er)[2:-1]))
+            return
         print(f"Подключено. Пользователь: {self.user}...")
-        # passw = getpass.getpass("Введите пароль: ")
-        passw = "0kSiWxCoLcFFeEoMF2Xr"
-        # TODO: добавить проверку успешной авторизации
-        mailbox.login(self.user, passw)
+        passw = getpass.getpass("Введите пароль: ")
+        try:
+            mailbox.login(self.user, passw)
+        except IMAP4.error as er:
+            print("Ошибка авторизации ({})".format(str(er)[2:-1]))
+            return
+            
         print("Авторизация прошла успешно. Считываем сообщения.")
         status, select_data = mailbox.select('INBOX')  # status=='OK'
-        messages_count = select_data[0].decode('utf-8')
-        status, search_data = mailbox.search(None, 'ALL')  # получаем список id 
+        messages_count = select_data[0].decode('utf-8')  # количество писем во входящих
+        status, search_data = mailbox.search(None, 'ALL')  # получаем список id писем
 
         all_id = search_data[0].split()
         if not self.check_interval(all_id):
@@ -99,44 +88,37 @@ class IMAPClient:
 
         if self.interval == ['-1']:
             for message_id in all_id:
-                message_id_str = message_id.decode('utf-8')
-                print("Fetching message {} of {}".format(message_id_str, messages_count))
-                letter = self.get_letter(mailbox, message_id)
-
-                # Надо сделать форматирование вывода результатов
-                print(letter)
+                self.process_letter(mailbox, message_id)
         else:
             if len(self.interval) == 1:
-                start_id = self.interval[0]
                 for message_id in all_id:
-                    if int(message_id) < start_id:  # от указанного до конца
+                    if int(message_id) < self.interval[0]:  # от указанного до конца
                         continue
                     # if message_id >= start_id:  # от первого до указанного
                         # return
-                    message_id_str = message_id.decode('utf-8')
-                    print("Fetching message {} of {}".format(message_id_str, messages_count))
-                    letter = self.get_letter(mailbox, message_id)
-
-                    # Надо сделать форматирование вывода результатов
-                    print(letter)
+                    self.process_letter(mailbox, message_id)
             else:
-                start_id = self.interval[0]
-                stop_id = self.interval[1]
                 for message_id in all_id:
-                    if int(message_id) < start_id:
+                    if int(message_id) < self.interval[0]:
                         continue
-                    if int(message_id) > stop_id:
+                    if int(message_id) > self.interval[1]:
                         return
-                    message_id_str = message_id.decode('utf-8')
-                    print("Fetching message {} of {}".format(message_id_str, messages_count))
-                    letter = self.get_letter(mailbox, message_id)
-
-                    # TODO: Надо сделать форматирование вывода результатов
-                    print(letter)
+                    self.process_letter(mailbox, message_id)
 
         mailbox.logout()
 
+    def formatter(self, letter) -> str:
+        """ Подготовка письма для печати (с вложениями если они есть) """
+        msg_from, msg_to, subject, date_time, msg_size, attaches = letter
+        result = "From: {:35}  To: {:20}  Subject: {:30}  Date: {:15}  Size: {:4}  Attaches: {:3}".format(msg_from, msg_to, subject, date_time, msg_size, len(attaches))
+        att = []
+        for i in range(len(attaches)):
+            s = "\n\t\tFilename: {:40}   File size: {:10}".format(attaches[i]['name'], attaches[i]['size'])
+            att.append(s)
+        return result + ''.join(att)
+
     def check_interval(self, ids) -> bool:
+        """ Проверка введенных пользователем интервалов """
         buf = [int(i) for i in ids]
         if self.interval == ['-1']:
             return True
@@ -145,9 +127,19 @@ class IMAPClient:
         elif len(self.interval) == 2:
             return self.interval[0] in buf and self.interval[1] in buf
 
+    def process_letter(self, mailbox, message_id):
+        """ Получение письма по id от сервера """
+        message_id_str = message_id.decode('utf-8')
+        # print("Fetching message {} of {}".format(message_id_str, messages_count))
+        letter = self.get_letter(mailbox, message_id)
+        print(self.formatter(letter))
+
     def get_letter(self, mailbox, id):
-        """ Получить письмо, разобрать по компонентам """
-        status, data = mailbox.fetch(id, '(RFC822)')
+        """ Получение письма по id, декодирование,
+        разбор по компонентам """
+        status, data = mailbox.fetch(id, '(RFC822)')  #61176
+        # TODO: сделать поиск размера письма регуляркой
+        # test_size = [int(i) for i in data[0][0].decode().split("{") if i.isdigit()]
         msg = email.message_from_bytes(data[0][1], _class = email.message.EmailMessage)
         raw_msg_to = msg['To']  # Кому
         raw_msg_from = msg['From']  # От кого
@@ -155,9 +147,9 @@ class IMAPClient:
         msg_to = dd(raw_msg_to)
         msg_from = dd(raw_msg_from)
         subject = dd(raw_sub)
-        date = msg['Date']
         timestamp = email.utils.parsedate_tz(msg['Date'])  # Время отправления (списком)
-        year, month, day, hour, minute, second = timestamp[:6]
+        YY, MM, DD, hh, mm, ss = timestamp[:6]
+        date_time = f'{hh}:{mm} {DD}.{MM}.{YY}'
         msg_size = 0  # размер письма в байтах
         attaches = []
         for part in msg.walk():
@@ -169,9 +161,9 @@ class IMAPClient:
             if bool(fileName):
                 size = len(part.get_payload(decode=True))
                 attaches.append({'name':fileName, 'size':size})
-        attaches_len = len(attaches)
+        attaches_count = len(attaches)
 
-        return msg_from, msg_to, subject, timestamp, msg_size, attaches
+        return msg_from, msg_to, subject, date_time, msg_size, attaches
 
 
 def dd(data):
@@ -182,3 +174,4 @@ def dd(data):
 if __name__=="__main__":
     IMAPClient(**get_args()).run()
     s = 23
+
