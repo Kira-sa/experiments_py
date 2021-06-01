@@ -1,5 +1,6 @@
 import argparse  # для разбора аргументов
 import getpass   # для возможности ввода пароля не отображая его в консоли
+import re        # для получения размера письма регулярным выражением
 
 from imaplib import IMAP4, IMAP4_SSL
 from ssl import SSLError
@@ -137,10 +138,9 @@ class IMAPClient:
     def get_letter(self, mailbox, id):
         """ Получение письма по id, декодирование,
         разбор по компонентам """
-        status, data = mailbox.fetch(id, '(RFC822)')  #61176
-        # TODO: сделать поиск размера письма регуляркой
-        # test_size = [int(i) for i in data[0][0].decode().split("{") if i.isdigit()]
-        msg = email.message_from_bytes(data[0][1], _class = email.message.EmailMessage)
+        status, data = mailbox.fetch(id, '(RFC822)')
+        msg_size = int(re.findall('(?<=\{)(.*?)(?=\})', data[0][0].decode())[0])  # получаем размер письма
+        msg = email.message_from_bytes(data[0][1], _class = email.message.EmailMessage)  # парсим письмо
         raw_msg_to = msg['To']  # Кому
         raw_msg_from = msg['From']  # От кого
         raw_sub = msg['Subject']  # Заголовок письма
@@ -150,12 +150,12 @@ class IMAPClient:
         timestamp = email.utils.parsedate_tz(msg['Date'])  # Время отправления (списком)
         YY, MM, DD, hh, mm, ss = timestamp[:6]
         date_time = f'{hh}:{mm} {DD}.{MM}.{YY}'
-        msg_size = 0  # размер письма в байтах
+        # msg_size = 0  # размер письма в байтах
         attaches = []
         for part in msg.walk():
-            if part.get_content_type() == 'text/plain':
-                body = part.get_payload(decode=True).decode('utf-8')
-                msg_size += len(body)
+            # if part.get_content_type() == 'text/plain':
+            #     body = part.get_payload(decode=True).decode('utf-8')
+            #     msg_size += len(body)
 
             fileName = part.get_filename()
             if bool(fileName):
