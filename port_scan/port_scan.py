@@ -1,14 +1,6 @@
 
 
 """ 
-TODO:
-* Написать сканер TCP- и UDP-портов удалённого компьютера.
-Вход: адрес хоста и диапазон портов
-( ) 1 список открытых TCP-портов,
-( ) 2 список открытых UDP-портов,
-( ) 3 многопоточность,
-( ) 4 распознать прикладной протокол по сигнатуре (NTP/DNS/SMTP/POP3/IMAP/HTTP).
-
 -t - сканировать tcp
 -u - сканировать udp
 -p N1 N2, --ports N1 N2 - диапазон портов
@@ -41,7 +33,7 @@ import random
 
 
 TIMEOUT = 3
-THREADS = 20
+THREADS = 10
 
 
 def parse_args():
@@ -107,8 +99,6 @@ class Scanner:
         """ Запускаем проверку очередного порта в новом потоке
             (берем номер очередного порта, запускаем его в обработку, 
             записываем номер порта в список обрабатываемых в текущий момент)"""
-        # if self._next_port > self._last_port:
-            # return
         port = self._next_port
         self._next_port += 1
         t = threading.Thread(target=self.check_port, args=(port,))
@@ -137,10 +127,23 @@ class Scanner:
         """ Если удалось подключиться значит порт доступен/открыт """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
         s.settimeout(self.timeout)
+        reply = ''
         try:
             resp = s.connect_ex((self.host, port))  # тот же connect, но с ошибкой если она была (0 если всё ОК)
+            if resp!=0:
+                # Вывод инфо если подключение не удалось (по разным причинам)
+                # with self._lock:
+                    # print("Ошибка при подключении к порту {}".format(port))
+                return
+
+            reply_raw = s.recv(4096)  # если к сокет удалось открыть то послушает, может что-нибудь скажет
             try:  
-                reply = str(s.recv(4096).decode('utf-8'))  # если к сокет удалось открыть то послушает, может что-нибудь скажет
+                reply = str(reply_raw.decode('utf-8'))  # попробуем привести сообщение в осмысленный вид
+
+            except UnicodeDecodeError:  # Полученное сообщение не удалось декодировать в utf-8
+                # with self._lock:
+                #     print("{}".format(reply_raw))
+                pass
             except socket.timeout:  
                 s.send(f'GET / HTTP/1.1\n\n'.encode())  # если по таймауту ничего не сказал - спросим сами
                 reply = s.recv(4096).decode('utf-8')
@@ -148,37 +151,41 @@ class Scanner:
             protocol = self.get_protocol(reply, port, "tcp")
             with self._lock:
                 self._ports_active.append(port)
-                print ("Found active port  TCP: {}  Protocol: {}".format(port, protocol))
+                # print ("Found active port  TCP: {}  Protocol: {}".format(port, protocol))
+                print ("TCP: {}  Protocol: {}".format(port, protocol))
             s.close()
 
         except socket.timeout as ex:  # таймаут
             return
+        # возможные ошибки при использовании s.connect(), бесполезно при s.connect_ex()
+        # except ConnectionRefusedError:  # сервер отклонил подключение
+        #     return
+        # except ConnectionResetError:  # сервер сбросил подключение
+        #     return
 
 
     def check_udp(self, port):
+        """ Если удалось подключиться значит порт доступен/открыт """
         reply = ''
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(self.timeout)
         pkg = self._build_packet()
-        connection_reply = s.connect_ex((self.host, port)) 
-        # a, b = s.getsockname()
-        if connection_reply == 0:  # подключение прошло
-            try:
-                a = s.sendto(pkg, (self.host, port))
-                reply = s.recv(1024)
-            except:
-                # print("Общения не удалось\n")
-                pass
-            # data, addr = s.recvfrom(1024)
-            # resp = s.recv
-            protocol = self.get_protocol(reply, port, "udp")
-            with self._lock:
-                self._ports_active.append(port)
-                print(f'UDP {port} {protocol}')
-
+        resp = s.connect_ex((self.host, port)) 
+        if resp != 0:  # подключение не прошло
+            return
+        try:
+            a = s.sendto(pkg, (self.host, port))
+            reply = s.recv(1024)
+        except:
+            # print("Общения не удалось\n")
+            return
+        protocol = self.get_protocol(reply, port, "udp")
+        with self._lock:
+            self._ports_active.append(port)
+            # print('Found active port  UDP {} {}'.format(port, protocol))
+            print('UDP {} {}'.format(port, protocol))
         s.close()
-        # except socket.timeout:
-            # pass
+
 
     def _build_packet(self):
         url = 'www.google.com'
@@ -201,12 +208,13 @@ class Scanner:
 
 
     @staticmethod
-    def get_protocol(reply, port, protocol) -> str:
+    def get_protocol(reply_in, port, protocol) -> str:
         """
         # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
         #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
         # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
         """
+        reply = reply_in[:100]
         try:
             # Вариант для определения по сигнатуре
             if 'HTTP/1.1' in reply:
@@ -226,17 +234,7 @@ class Scanner:
             return 'Unknown'
 
 
-
 class AllThreadsStarted(Exception): pass
-
-
-class PortScannerError(Exception):
-    message: str
-
-
-class BadPortRangeError(PortScannerError):
-    def __init__(self, port_range):
-        self.message = f'Bad port range {port_range}'
 
 
 if __name__ == "__main__":
@@ -247,5 +245,58 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print('\nTerminated.')
         exit()
-    # scanner = IPv4PortScanner(domain=domain, port_range=(port_s, port_e))
-    # scanner.run()
+
+"""
+Как это работает?
+==================================================
+Вызов - разбираются аргументы и передаются в scan()
+  scan()  Вызывает проверку указанных портов validate_ports() и если всё ок - 
+  Создает экземпляр класса Scanner и запускает его метод scanner.run()
+
+    run() - выполняется пока есть непроверенные порты.
+    * "аккуратно", т.е. с блокировкой ресурсов на время их проверки, провеярет
+        сколько потоков заняты работой, если занято меньше указанного в THREADS (self.threadcount),
+        то вычисляет сколько конкретно еще он может запустить (slots_available) и запускает,
+        вызывая start_another_thread()
+      
+      start_another_thread() - 
+      * запускает в обработку порт с очередным номером (port) в новый поток, методом self.check_port() ,
+      * вычисляет следующий для проверки (self._next_port), 
+      * пополняет список проверяемых в текущий момент портов (self._ports_being_checked)
+        
+        check_port() - 
+        * вызывает непосредственно проверку порта (self.check_port_()),
+        * по завершению проверки "аккуратно" убирает порт из списка обрабатываемых
+
+          check_port_() - 
+          * если указаны tcp/udp делает соответствующие вызовы
+
+            check_tcp() - проверяет порт хоста
+            * настраивает сокет
+            * пытается подключиться (s.connect_ex()), если удалось - половина успеха
+                * пытается в обмен сообщениями, если удалось получить сообщение 
+                пробует его декодировать в utf-8 и проверить на предмет наличия 
+                специфичных для разного рода протоколов ключевых слов методом get_protocol()
+                * особо не важно удалось общение или нет, раз удалось подключиться,
+                поэтому "аккуратно" записывает порт в список активных (self._ports_active) 
+                и также "аккуратно" выводит сообщение на экран
+
+            check_udp() - проверяет порт хоста
+            * настраивает сокет
+            * пытается подключиться (s.connect_ex()), если удалось - успех
+                * пытается в обмен сообщениями - почти всегда общение не удастся,
+                так как принимающий сервер вероятно просто 
+                ===> фильтрует входящие пакеты <===
+                * опять же "аккуратно" записывает порт в список активных (self._ports_active) 
+                * "аккуратно" выводит сообщение на экран
+                ** между делом использует метод _build_packet() для сборки кастом-пакета,
+                оставлено было лишь с одной целью - чтобы было, особо это не нужно
+                и кроме как при "общении" с одним из серверов гугла ("142.250.185.78")
+                не применимо (кстати гугл как-то интересно откликался по этому адресу по udp, порт 53,
+                который вроде DNS, так что не суть...)
+
+  get_protocol() - пытается в угадывание протокола
+    * в ифах - предположительно ключевые слова, который могут присутствовать 
+        в ответах сервера, соответственно роли порта
+    * socket.getservbyport() - возвращает стандартную/дефолт роль порта
+"""

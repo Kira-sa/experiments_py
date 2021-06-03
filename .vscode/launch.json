@@ -10,12 +10,14 @@
             "request": "launch",
             "program": "${file}",
             "args": [
+                // "--tcp",
                 "--udp",
-                "--tcp",
-                "8.8.8.8",
+                "142.250.185.78", // google.com
+                // "62.210.18.40",
+                // "45.33.39.39",
                 "--ports",
-                "2",
-                "90"
+                "5201",
+                "5202"
             ],
             "console": "integratedTerminal"
         },
