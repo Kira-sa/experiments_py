@@ -26,8 +26,8 @@ UDP 123 SNTP
 
 import argparse  # для разбора аргументов
 import sys
-# import socket+
-from socket import AF_INET, SOCK_STREAM, SOCK_DGRAM, socket, timeout
+import socket
+# from socket import AF_INET, SOCK_STREAM, SOCK_DGRAM, socket, timeout
 import threading 
 from datetime import datetime, time
 from traceback import print_exc
@@ -35,6 +35,13 @@ import re
 from typing import List, Tuple
 from threading import Lock, Thread
 from queue import Queue
+
+import struct
+import random
+
+
+TIMEOUT = 3
+THREADS = 1
 
 
 def parse_args():
@@ -53,15 +60,18 @@ def validate_ports(port_range: list) -> Tuple[int, int]:
     a, b = port_range
     return (a, b) if (a < b and 1 < a < 65535 and 1 < b < 65535) else (None, None)
 
+
 def scan(tcp: bool, udp: bool, host: str, ports: List[str]):
     port_start, port_end = validate_ports(ports)
     if port_start:
-        scanner = Scanner(host, port_start, port_end, 1, 10)
-        scanner.start_scan(tcp, udp)
+        scanner = Scanner(tcp, udp, host, port_start, port_end, TIMEOUT, THREADS)
+        scanner.run()
 
 
 class Scanner:
-    def __init__(self, host: str, port_start: int, port_end: int, timeout=1.0, threadcount=10):
+    def __init__(self, tcp, udp, host: str, port_start: int, port_end: int, timeout=1.0, threadcount=10):
+        self.tcp = tcp
+        self.udp = udp
         self.host = host
         self.timeout = timeout
         self.threadcount = threadcount
@@ -83,9 +93,9 @@ class Scanner:
                     self._condition.wait()
                 slots_available = self.threadcount - len(self._ports_being_checked)
                 self._condition.release()  # снимаем блокировку
-                # if self._next_port > self._last_port:
-                #     return
-                print ("Checking {} - {}".format(self._next_port, self._next_port+slots_available))    
+                if self._next_port > self._last_port:
+                    return
+                # print ("Checking {} - {}".format(self._next_port, self._next_port+slots_available))    
                 for i in range(slots_available):  # запустить пачку потоков
                     self.start_another_thread()
         except AllThreadsStarted as ex:
@@ -97,8 +107,8 @@ class Scanner:
         """ Запускаем проверку очередного порта в новом потоке
             (берем номер очередного порта, запускаем его в обработку, 
             записываем номер порта в список обрабатываемых в текущий момент)"""
-        if self._next_port > self._last_port:
-            return
+        # if self._next_port > self._last_port:
+            # return
         port = self._next_port
         self._next_port += 1
         t = threading.Thread(target=self.check_port, args=(port,))
@@ -118,81 +128,94 @@ class Scanner:
             self._condition.release()
 
     def check_port_(self, port):
-        "If connects then port is active"
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(self.timeout)
+        if self.tcp:
+            self.check_tcp(port)
+        if self.udp:
+            self.check_udp(port)
+
+    def check_tcp(self, port):
+        """ Если удалось подключиться значит порт доступен/открыт """
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
+        # s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # ???
+        s.settimeout(self.timeout)
         try:
-            sock.connect((self.domain, port))
+            # s.connect((self.host, port))
+            resp = s.connect_ex((self.host, port))  # тот же connect, но с ошибкой если она была (0 если всё ОК)
+            try:  
+                response = str(s.recv(4096).decode('utf-8'))  # если к сокет удалось открыть то послушает, может что-нибудь скажет
+            except socket.timeout:  
+                s.send(f'GET / HTTP/1.1\n\n'.encode())  # если по таймауту ничего не сказал - спросим сами
+                response = s.recv(4096).decode('utf-8')
+            
+            protocol = self.get_protocol(response)
             with self._lock:
                 self._ports_active.append(port)
-            print ("Found active port {}".format(port))
-            sock.close()
-        except socket.timeout as ex:
+                print ("Found active port  TCP: {}  Protocol: {}".format(port, protocol))
+
+            s.close()
+
+        except socket.timeout as ex:  # таймаут
             return
-        except:
-            print_exc()
+        # except socket.error:
+            # print("\ Server not responding !!!!")
+            # sys.exit()
+        # except (OSError, ConnectionRefusedError):  #???
+        #     pass
+        # except PermissionError:
+        #     with self._lock:
+        #         print(f'TCP {port}: Not enough rights')
+        # except:
+        #     print_exc()
 
+    def check_udp(self, port):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(self.timeout)
+        # try:
+        pkg = self._build_packet()
+        # r= s.connect_ex((self.host, port)) 
+        s.sendto(pkg, (self.host, port))
+        # s.sendto(b'Ok', (self.host, port))
+        r = s.recv(4096)
+        rr = str(r)
 
-#  ---------------------------------------------------
-#  ---------------------------------------------------
+        resp = repr(r)
+        a, b = s.getsockname()
+        # data, addr = s.recvfrom(1024)
+        # resp = s.recv
+        protocol = self.get_protocol(resp)
+        print(f'UDP {port} {protocol}')
 
-    def start_scan(self, tcp: bool, udp:bool):
-        threads = []
-        for port in self.port_range:
-            if not udp or tcp:
-                self.ports_queue.put(port)
-                t = Thread(target=self.thread_scan, args=(self.scan_tcp_port,))
-                threads.append(t)
-            if not tcp or udp:
-                self.ports_queue.put(port)
-                t = Thread(target=self.thread_scan, args=(self.scan_udp_port,))
-                threads.append(t)
-        for thread in threads:
-            thread.start()
-        self.ports_queue.join()
-    
-    def thread_start(self, scan_func):
-        port = self.ports_queue.get()
-        scan_func(port)
-        self.ports_queue.task_done()
+        s.close()
+        # except socket.timeout:
+            # pass
 
-    def scan_udp_port(self, port: int):
-        return
-        try:
-            with socket(AF_INET, SOCK_DGRAM) as sock:
-                sock.settimeout(3)
-                sock.sendto(b'hello', (self.host, port))
-                response = sock.recv(1024).decode('utf-8')
-            protocol = self.get_protocol(response)
-            print(f'UDP {port} {protocol}')
-        except (timeout, OSError):
-            pass
-        except PermissionError:
-            with self._lock:
-                print(f'UDP {port}: Not enough rights')
+    def _build_packet(self):
+        url = 'www.google.com'
+        randint = random.randint(0, 65535)
+        packet = struct.pack(">H", randint)  # Query Ids (Just 1 for now)
+        packet += struct.pack(">H", 0x0100)  # Flags
+        packet += struct.pack(">H", 1)  # Questions
+        packet += struct.pack(">H", 0)  # Answers
+        packet += struct.pack(">H", 0)  # Authorities
+        packet += struct.pack(">H", 0)  # Additional
+        split_url = url.split(".")
+        for part in split_url:
+            packet += struct.pack("B", len(part))
+            for s in part:
+                packet += struct.pack('c',s.encode())
+        packet += struct.pack("B", 0)  # End of String
+        packet += struct.pack(">H", 1)  # Query Type
+        packet += struct.pack(">H", 1)  # Query Class
+        return packet
 
-    def scan_tcp_port(self, port: int):
-        try:
-            with socket(AF_INET, SOCK_STREAM) as sock:
-                sock.settimeout(0.5)
-                sock.connect((self.host, port))
-                try:
-                    response = str(sock.recv(1024).decode('utf-8'))
-                except timeout:
-                    sock.send(f'GET / HTTP/1.1\n\n'.encode())
-                    response = sock.recv(1024).decode('utf-8')
-            protocol = self.get_protocol(response)
-            with self._lock:
-                print(f'TCP {port} {protocol}')
-        except (OSError, ConnectionRefusedError):
-            pass
-        except PermissionError:
-            with self._lock:
-                print(f'TCP {port}: Not enough rights')
 
     @staticmethod
     def get_protocol(response: str) -> str:
+        """
+        # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
+        #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
+        # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
+        """
         if 'HTTP/1.1' in response:
             return 'HTTP'
         if 'SMTP' in response:
@@ -206,79 +229,6 @@ class Scanner:
 
 
 class AllThreadsStarted(Exception): pass
-
-
-class IPv4PortScanner(object):
-    def __init__(self, domain, timeout=1.0, port_range=(1024, 65535), threadcount=10):
-        self.domain = domain  # цель
-        self.timeout = timeout
-        self.port_range = port_range
-        self.threadcount = threadcount
-        self._lock = threading.Lock()
-        self._condition = threading.Condition(self._lock)
-        self._ports_active  = []
-        self._ports_being_checked = []
-
-        self._next_port = self.port_range[0]
-        self._last_port = self.port_range[1]
-
-    def check_port_(self, port):
-        "If connects then port is active"
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(self.timeout)
-        try:
-            sock.connect((self.domain, port))
-            with self._lock:
-                self._ports_active.append(port)
-            print ("Found active port {}".format(port))
-            sock.close()
-        except socket.timeout as ex:
-            return
-        except:
-            print_exc()
-            # pdb.set_trace()
-
-    def check_port(self, port):
-        "updates self._ports_being_checked list on exit of this method"
-        try:
-            self.check_port_(port)
-        finally:
-            self._condition.acquire()
-            self._ports_being_checked.remove(port)
-            self._condition.notifyAll()
-            self._condition.release()
-
-    def start_another_thread(self):
-        if self._next_port > self._last_port:
-            return
-        port             = self._next_port
-        self._next_port += 1
-        t = threading.Thread(target=self.check_port, args=(port,))
-        # update books
-        with self._lock:
-            self._ports_being_checked.append(port)
-        t.start()
-
-    def run(self):
-        try:
-            while True:
-                self._condition.acquire()  # блокируем ресурсы, во имя избежания коллизий
-                while len(self._ports_being_checked) >= self.threadcount:
-                    # we wait for some threads to complete the task
-                    self._condition.wait()
-                slots_available = self.threadcount - len(self._ports_being_checked)
-                self._condition.release()  # освобождаем ресурсы
-                print ("Checking {} - {}".format(self._next_port, self._next_port+slots_available))
-                if self._next_port > self._last_port:
-                    return
-                for i in range(slots_available):  # запустить пачку потоков
-                    self.start_another_thread()
-        except AllThreadsStarted as ex:
-            print ("All threads started ...")
-        except:
-            print_exc()
-
 
 
 class PortScannerError(Exception):
