@@ -41,7 +41,7 @@ import random
 
 
 TIMEOUT = 3
-THREADS = 1
+THREADS = 20
 
 
 def parse_args():
@@ -136,54 +136,45 @@ class Scanner:
     def check_tcp(self, port):
         """ Если удалось подключиться значит порт доступен/открыт """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
-        # s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # ???
         s.settimeout(self.timeout)
         try:
-            # s.connect((self.host, port))
             resp = s.connect_ex((self.host, port))  # тот же connect, но с ошибкой если она была (0 если всё ОК)
             try:  
-                response = str(s.recv(4096).decode('utf-8'))  # если к сокет удалось открыть то послушает, может что-нибудь скажет
+                reply = str(s.recv(4096).decode('utf-8'))  # если к сокет удалось открыть то послушает, может что-нибудь скажет
             except socket.timeout:  
                 s.send(f'GET / HTTP/1.1\n\n'.encode())  # если по таймауту ничего не сказал - спросим сами
-                response = s.recv(4096).decode('utf-8')
+                reply = s.recv(4096).decode('utf-8')
             
-            protocol = self.get_protocol(response)
+            protocol = self.get_protocol(reply, port, "tcp")
             with self._lock:
                 self._ports_active.append(port)
                 print ("Found active port  TCP: {}  Protocol: {}".format(port, protocol))
-
             s.close()
 
         except socket.timeout as ex:  # таймаут
             return
-        # except socket.error:
-            # print("\ Server not responding !!!!")
-            # sys.exit()
-        # except (OSError, ConnectionRefusedError):  #???
-        #     pass
-        # except PermissionError:
-        #     with self._lock:
-        #         print(f'TCP {port}: Not enough rights')
-        # except:
-        #     print_exc()
+
 
     def check_udp(self, port):
+        reply = ''
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(self.timeout)
-        # try:
         pkg = self._build_packet()
-        # r= s.connect_ex((self.host, port)) 
-        s.sendto(pkg, (self.host, port))
-        # s.sendto(b'Ok', (self.host, port))
-        r = s.recv(4096)
-        rr = str(r)
-
-        resp = repr(r)
-        a, b = s.getsockname()
-        # data, addr = s.recvfrom(1024)
-        # resp = s.recv
-        protocol = self.get_protocol(resp)
-        print(f'UDP {port} {protocol}')
+        connection_reply = s.connect_ex((self.host, port)) 
+        # a, b = s.getsockname()
+        if connection_reply == 0:  # подключение прошло
+            try:
+                a = s.sendto(pkg, (self.host, port))
+                reply = s.recv(1024)
+            except:
+                # print("Общения не удалось\n")
+                pass
+            # data, addr = s.recvfrom(1024)
+            # resp = s.recv
+            protocol = self.get_protocol(reply, port, "udp")
+            with self._lock:
+                self._ports_active.append(port)
+                print(f'UDP {port} {protocol}')
 
         s.close()
         # except socket.timeout:
@@ -210,21 +201,29 @@ class Scanner:
 
 
     @staticmethod
-    def get_protocol(response: str) -> str:
+    def get_protocol(reply, port, protocol) -> str:
         """
         # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
         #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
         # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
         """
-        if 'HTTP/1.1' in response:
-            return 'HTTP'
-        if 'SMTP' in response:
-            return 'SMTP'
-        if 'IMAP' in response:
-            return 'IMAP'
-        if 'OK' in response:
-            return 'POP3'
-        return ''
+        try:
+            # Вариант для определения по сигнатуре
+            if 'HTTP/1.1' in reply:
+                return 'looks like HTTP'
+            if 'SMTP' in reply:
+                return 'looks like SMTP'
+            if 'IMAP' in reply:
+                return 'looks like IMAP'
+            if 'OK' in reply:
+                return 'looks like POP3'
+            # Вариант для дефолтных портов 
+            # (Может работать некорректно т.к. показывает какой 
+            # обычно протокол работает на указанном порту, но ничего 
+            # не мешает людям использовать почти любой другой для своих целей)
+            return socket.getservbyport(port, protocol).upper()
+        except:
+            return 'Unknown'
 
 
 

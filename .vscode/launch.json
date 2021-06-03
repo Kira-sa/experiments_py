@@ -11,10 +11,11 @@
             "program": "${file}",
             "args": [
                 "--udp",
+                "--tcp",
                 "8.8.8.8",
                 "--ports",
-                "53",
-                "54"
+                "2",
+                "90"
             ],
             "console": "integratedTerminal"
         },
