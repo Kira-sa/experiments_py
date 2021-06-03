@@ -5,6 +5,20 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: scan ports",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                "--tcp",
+                "8.8.8.8",
+                "--ports",
+                "70",
+                "90"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python: Текущий файл",
             "type": "python",
             "request": "launch",
@@ -17,9 +31,11 @@
             "request": "launch",
             "program": "${file}",
             "args": [
-                "--server", "imap.mail.ru:993",
-                "--user", "fantom.krez@mail.ru",
-                "--ssl", 
+                "--server",
+                "imap.mail.ru:993",
+                "--user",
+                "fantom.krez@mail.ru",
+                "--ssl",
             ],
             "console": "integratedTerminal"
         }
