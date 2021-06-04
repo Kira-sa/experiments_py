@@ -1,5 +1,3 @@
-
-
 """ 
 -t - сканировать tcp
 -u - сканировать udp
@@ -174,14 +172,17 @@ class Scanner:
         if resp != 0:  # подключение не прошло
             return
         try:
-            a = s.sendto(pkg, (self.host, port))
+            # a = s.sendto(pkg, (self.host, port))
+            a = s.sendto(b"Hello world!", (self.host, port))
             reply = s.recv(1024)
-        except:
+        except socket.timeout:
             # print("Общения не удалось\n")
-            return
+            pass
+            # return
         protocol = self.get_protocol(reply, port, "udp")
         with self._lock:
             self._ports_active.append(port)
+            # print(reply)
             # print('Found active port  UDP {} {}'.format(port, protocol))
             print('UDP {} {}'.format(port, protocol))
         s.close()

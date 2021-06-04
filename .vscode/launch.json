@@ -10,14 +10,15 @@
             "request": "launch",
             "program": "${file}",
             "args": [
-                // "--tcp",
+                "--tcp",
                 "--udp",
-                "142.250.185.78", // google.com
+                // "142.250.185.78", // google.com
                 // "62.210.18.40",
                 // "45.33.39.39",
+                "94.100.180.90", //imap.mail.ru
                 "--ports",
-                "5201",
-                "5202"
+                "993",
+                "1000"
             ],
             "console": "integratedTerminal"
         },
