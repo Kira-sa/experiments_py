@@ -93,6 +93,7 @@ class SNTPpack():
             unpacked = struct.unpack('!4B3L4Q', data[:size])
             self.LI, self.VN, self.mode = self.parse_first_byte(unpacked[0])
             self.transmit_timestamp = struct.unpack('!Q', data[40:48])[0]
+            a = 23
         except BaseException:
             print('Invalid SNTP-packet format')
 
