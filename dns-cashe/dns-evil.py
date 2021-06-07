@@ -114,7 +114,7 @@ class DNSServer:
                 # if self.task.empty():
                     # time.sleep(1)
                 req, req_addr, req_time = self.task.get(timeout=1)
-                request = DNSpack()
+                request = decode_dns_message(req)
                 # request.parse_package(req)  # разбираем запрос клиента
                 response = self.prepare_response(request, req_time).create_package() # готовим ответ
                 self.sock.sendto(response, req_addr)  # отправляем
@@ -128,46 +128,104 @@ class DNSServer:
         pass
 
 
-class DNSpack():
-    def __init__(self) -> None:
-        pass
 
-    def build_packet(self, url):
-        # Flags
-        # QR = 0      # Query: 0, Response: 1     1bit
-        # OPCODE = 0  # Standard query            4bit
-        # AA = 0      # ?                         1bit
-        # TC = 0      # Message is truncated?     1bit
-        # RD = 1      # Recursion?                1bit
-        # RA = 0      # ?                         1bit
-        # Z = 0       # ?                         3bit
-        # RCODE = 0   # ?                         4bit
-        randint = random.randint(0, 65535)
-        packet = struct.pack(">H", randint)  # Query Ids # Query: 0, Response: 1 
-        packet += struct.pack(">H", 0x0100)  # Flags
-        packet += struct.pack(">H", 1)  # QDCOUNT  Number of questions           4bit
-        packet += struct.pack(">H", 0)  # ANCOUNT  Number of answers             4bit
-        packet += struct.pack(">H", 0)  # NSCOUNT  Number of authority records   4bit
-        packet += struct.pack(">H", 0)  # ARCOUNT  Number of additional records  4bit
-        split_url = url.split(".")
-        for part in split_url:
-            packet += struct.pack("B", len(part))
-            for s in part:
-                packet += struct.pack('c',s.encode())
-        packet += struct.pack("B", 0)   # Terminating bit for QNAME
-        packet += struct.pack(">H", 1)  # QTYPE Query Type
-        packet += struct.pack(">H", 1)  # QCLASS Query Class
-        return packet
+def encode_dns_message(url):
+    # Flags
+    # QR = 0      # Query: 0, Response: 1     1bit
+    # OPCODE = 0  # Standard query            4bit
+    # AA = 0      # ?                         1bit
+    # TC = 0      # Message is truncated?     1bit
+    # RD = 1      # Recursion?                1bit
+    # RA = 0      # ?                         1bit
+    # Z = 0       # ?                         3bit
+    # RCODE = 0   # ?                         4bit
+    randint = random.randint(0, 65535)
+    packet = struct.pack(">H", randint)  # Query Ids # Query: 0, Response: 1 
+    packet += struct.pack(">H", 0x0100)  # Flags
+    packet += struct.pack(">H", 1)  # QDCOUNT  Number of questions           4bit
+    packet += struct.pack(">H", 0)  # ANCOUNT  Number of answers             4bit
+    packet += struct.pack(">H", 0)  # NSCOUNT  Number of authority records   4bit
+    packet += struct.pack(">H", 0)  # ARCOUNT  Number of additional records  4bit
+    split_url = url.split(".")
+    for part in split_url:
+        packet += struct.pack("B", len(part))
+        for s in part:
+            packet += struct.pack('c',s.encode())
+    packet += struct.pack("B", 0)   # Terminating bit for QNAME
+    packet += struct.pack(">H", 1)  # QTYPE Query Type
+    packet += struct.pack(">H", 1)  # QCLASS Query Class
+    return packet
 
-    def parse_packet(self, pack):
-        id = 0
-        flags = 0
-        QDCOUNT = 0
-        ANCOUNT = 0
-        NSCOUNT = 0
-        ARCOUNT = 0
-        
-        return ()
+def decode_labels(message, offset):
+    labels = []
+
+    while True:
+        length, = struct.unpack_from("!B", message, offset)
+
+        if (length & 0xC0) == 0xC0:
+            pointer, = struct.unpack_from("!H", message, offset)
+            offset += 2
+
+            return labels + decode_labels(message, pointer & 0x3FFF), offset
+
+        if (length & 0xC0) != 0x00:
+            # raise StandardError("unknown label encoding")
+            print("unknown label encoding")
+            return
+
+        offset += 1
+        if length == 0:
+            return labels, offset
+        labels.append(*struct.unpack_from("!%ds" % length, message, offset))
+        offset += length
+
+def decode_question_section(message, offset, qdcount):
+    questions = []
+    for _ in range(qdcount):
+        qname, offset = decode_labels(message, offset)
+        qtype, qclass = struct.unpack_from("!2H", message, offset)
+        offset += struct.calcsize("!2H")
+        question = {"domain_name": qname,
+                    "query_type": qtype,
+                    "query_class": qclass}
+        questions.append(question)
+
+    return questions, offset
+
+def parse_flags(flags):
+    res = {}
+    res['qr'] = (flags & 0x8000) != 0
+    res['opcode'] = (flags & 0x7800) >> 11
+    res['aa'] = (flags & 0x0400) != 0
+    res['tc'] = (flags & 0x200) != 0
+    res['rd'] = (flags & 0x100) != 0
+    res['ra'] = (flags & 0x80) != 0
+    res['z'] = (flags & 0x70) >> 4
+    res['rcode'] = flags & 0xF
+    return res
+
+def decode_dns_message(message):
+    id, raw_flags, qdcount, ancount, nscount, arcount = struct.unpack("!6H", message)
+    flags = parse_flags(raw_flags)
+    offset = struct.calcsize("!6H")
+    questions, offset = decode_question_section(message, offset, qdcount)
+
+    result = {"id": id,
+              "is_response": flags['qr'],
+              "opcode": flags['opcode'],
+              "is_authoritative": flags['aa'],
+              "is_truncated": flags['tc'],
+              "recursion_desired": flags['rd'],
+              "recursion_available": flags['ra'],
+              "reserved": flags['z'],
+              "response_code": flags['rcode'],
+              "question_count": qdcount,
+              "answer_count": ancount,
+              "authority_count": nscount,
+              "additional_count": arcount,
+              "questions": questions}
+
+    return result
 
 
 if __name__ == "__main__":
