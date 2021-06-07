@@ -31,6 +31,8 @@ import queue
 import time
 import select
 import sqlite3
+import random
+import struct
 import binascii
 
 dns = (('8.8.8.8',53), )
@@ -125,10 +127,47 @@ class DNSServer:
     def parse_request(self):
         pass
 
-    
+
 class DNSpack():
     def __init__(self) -> None:
         pass
+
+    def build_packet(self, url):
+        # Flags
+        # QR = 0      # Query: 0, Response: 1     1bit
+        # OPCODE = 0  # Standard query            4bit
+        # AA = 0      # ?                         1bit
+        # TC = 0      # Message is truncated?     1bit
+        # RD = 1      # Recursion?                1bit
+        # RA = 0      # ?                         1bit
+        # Z = 0       # ?                         3bit
+        # RCODE = 0   # ?                         4bit
+        randint = random.randint(0, 65535)
+        packet = struct.pack(">H", randint)  # Query Ids # Query: 0, Response: 1 
+        packet += struct.pack(">H", 0x0100)  # Flags
+        packet += struct.pack(">H", 1)  # QDCOUNT  Number of questions           4bit
+        packet += struct.pack(">H", 0)  # ANCOUNT  Number of answers             4bit
+        packet += struct.pack(">H", 0)  # NSCOUNT  Number of authority records   4bit
+        packet += struct.pack(">H", 0)  # ARCOUNT  Number of additional records  4bit
+        split_url = url.split(".")
+        for part in split_url:
+            packet += struct.pack("B", len(part))
+            for s in part:
+                packet += struct.pack('c',s.encode())
+        packet += struct.pack("B", 0)   # Terminating bit for QNAME
+        packet += struct.pack(">H", 1)  # QTYPE Query Type
+        packet += struct.pack(">H", 1)  # QCLASS Query Class
+        return packet
+
+    def parse_packet(self, pack):
+        id = 0
+        flags = 0
+        QDCOUNT = 0
+        ANCOUNT = 0
+        NSCOUNT = 0
+        ARCOUNT = 0
+        
+        return ()
 
 
 if __name__ == "__main__":
