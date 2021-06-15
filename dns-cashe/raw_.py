@@ -13,43 +13,47 @@ except ImportError:
     gevent = None
 
 dns = (
-        ('8.8.8.8',53),
-        ('8.8.4.4',53),
+        ('8.8.8.8', 53),
+        ('8.8.4.4', 53),
 )
 
 pidfile = '/var/run/dnsAgent.pid'
 
 logging.basicConfig(
-        level    = logging.DEBUG,
+        level = logging.DEBUG,
         filename = '/tmp/dnsAgent.log',
         filemode = 'a',
-        datefmt  = '%Y-%m-%d %H:%M:%S',
-        format   = '%(asctime)s %(levelname)-8s %(message)s',
+        datefmt = '%Y-%m-%d %H:%M:%S',
+        format = '%(asctime)s %(levelname)-8s %(message)s',
 )
 
+
 class cache(object):
-    def __init__(self,filename=':memory:'):
-        self.db = sqlite3.connect(filename,isolation_level=None)
+    def __init__(self, filename=':memory:'):
+        self.db = sqlite3.connect(filename, isolation_level=None)
         self.db.text_factory = str
         cursor = self.db.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS T_CACHE (K BLOB PRIMARY KEY,V BLOB)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS T_CACHE \
+        (K BLOB PRIMARY KEY,V BLOB)')
         cursor.execute('PRAGMA journal_mode = off')
         cursor.close()
-    def get(self,K):
+        
+    def get(self, K):
         cursor = self.db.cursor()
         try:
-            cursor.execute('SELECT V FROM T_CACHE WHERE K = ?',(K,))
+            cursor.execute('SELECT V FROM T_CACHE WHERE K = ?', (K,))
             return cursor.fetchall()[0][0]
         except IndexError:
             pass
         finally:
             cursor.close()
-    def put(self,K,V):
+
+    def put(self, K, V):
         cursor = self.db.cursor()
         try:
-            cursor.execute('INSERT INTO T_CACHE (K,V) VALUES (?,?)',(K,V))
+            cursor.execute('INSERT INTO T_CACHE (K,V) VALUES (?,?)', (K,V))
         except sqlite3.IntegrityError:
-            cursor.execute('UPDATE T_CACHE SET V = ? WHERE K = ?',(V,K))
+            cursor.execute('UPDATE T_CACHE SET V = ? WHERE K = ?', (V,K))
         finally:
             cursor.close()
 
@@ -59,10 +63,10 @@ class DNSServer(SocketServer.BaseRequestHandler):
     dns_cache = cache()
 
     def handle(self):
-        data,sk = self.request
+        data, sk = self.request
         if not data:return
         response = self._query(data)
-        if response:sk.sendto(response,self.client_address)
+        if response:sk.sendto(response, self.client_address)
 
     def _query(self,data):
         ID,K = data[:2],data[2:]
@@ -70,14 +74,14 @@ class DNSServer(SocketServer.BaseRequestHandler):
         if V:return ''.join([ID,V])
         query = ''.join([struct.pack('>H',len(data)),data])
         for s in dns:
-            sk = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sk.settimeout(5)
             try:
                 sk.connect(s)
                 sk.send(query)
                 response = sk.recv(2048)
             except Exception as e:
-                logging.error('connect %s:%i error:%s'%(s[0],s[1],e))
+                logging.error('connect %s:%i error:%s'%(s[0], s[1], e))
                 response = None
             finally:
                 sk.close()
@@ -106,6 +110,7 @@ if __name__ == '__main__':
         logging.info('Using gevent')
     except:
         logging.info('Using thread')
+        
     try:
         server = SocketServer.ThreadingUDPServer(('localhost', 53), DNSServer)
         server.serve_forever()

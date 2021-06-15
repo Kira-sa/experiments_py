@@ -45,7 +45,7 @@ class SNTPserver:
         return SNTPpack(self.delay, 
                         stratum=3, 
                         version=4, #request.version, 
-                        mode=4, # 4 - сервер, 3 - клиент, что бы это ни значило
+                        mode=4, # 4 - сервер, 3 - клиент
                         originate_time=request.transmit_timestamp,
                         recive_time=recive_time + self.delay
                         )
@@ -60,31 +60,60 @@ class SNTPserver:
                 req, req_addr, req_time = self.task.get(timeout=1)
                 request = SNTPpack()
                 request.parse_package(req)  # разбираем запрос клиента
-                response = self.prepare_response(request, req_time).create_package() # готовим ответ
+                response = self.prepare_response(request, 
+                    req_time).create_package() # готовим ответ
                 self.sock.sendto(response, req_addr)  # отправляем
             except queue.Empty:
                 continue
 
 
 class SNTPpack():
-    SNTP_MODE = {'reserved': 0, 'symmetry active':1, 'symmetry passive':2, 'client': 3, 'server': 4, 'broadcast':5}
+    """ 
+    Leap Indicator - индикатор коррекции
+    Version Number (3 bits) - номер версии, в настоящее время = 4
+    mode - NTP packet mode
+    stratum - страта (1 Byte) - поле определено для сообщений сервера
+    poll - интервал опроса (8 bits, знаковый int)
+    Clock precision - точность системных часов
+    root_delay - задержка
+    root_dispersion - дисперсия
+    Reference Identifier - идентификатор источника
+    ref_timestamp - время обновления (This field is the time the system clock 
+        was last set or corrected, in 64-bit time-stamp format.)
+    originate_timestamp - начальное время (This value is the time at which the 
+        request departed the client for the server, in 64-bit time-stamp 
+        format.)
+    recive_timestamp - время приема (This value is the time at which the 
+        client request arrived at the server in 64-bit time-stamp format.)
+    transmit_timestamp - время отправки (This value is the time at which the 
+        server reply departed the server, in 64-bit time-stamp format.)
+    """
+
+    SNTP_MODE = {
+        'reserved': 0, 
+        'symmetry active':1, 
+        'symmetry passive':2, 
+        'client': 3, 
+        'server': 4, 
+        'broadcast': 5
+        }
 
     def __init__(self, delay=0, stratum=3, version=4, mode=4, originate_time=0, recive_time=0):
         """ https://labs.apnic.net/?p=462 - описание протокола NTP """
-        self.delay = delay      # настраиваемая зарержка/опережение
-        self.LI = 0             # Leap Indicator - индикатор коррекции
-        self.VN = version       # Version Number (3 bits) - номер версии, в настоящее время = 4
-        self.mode = mode        # NTP packet mode
-        self.stratum = stratum  # страта (1 Byte) - поле определено для сообщений сервера
-        self.poll = 0           # интервал опроса (8 bits, знаковый int) 
-        self.precision = 0      # Clock precision - точность системных часов
-        self.root_delay = 0     # задержка
-        self.root_dispersion = 0  # дисперсия
-        self.ref_id = 0         # Reference Identifier - идентификатор источника
-        self.ref_timestamp = 0  # время обновления (This field is the time the system clock was last set or corrected, in 64-bit time-stamp format.)
-        self.originate_timestamp = originate_time  # начальное время (This value is the time at which the request departed the client for the server, in 64-bit time-stamp format.)
-        self.recive_timestamp = recive_time  # время приема (This value is the time at which the client request arrived at the server in 64-bit time-stamp format.)
-        self.transmit_timestamp = 0  # время отправки (This value is the time at which the server reply departed the server, in 64-bit time-stamp format.)
+        self.delay = delay  # настраиваемая зарержка/опережение
+        self.LI = 0
+        self.VN = version
+        self.mode = mode
+        self.stratum = stratum
+        self.poll = 0
+        self.precision = 0
+        self.root_delay = 0
+        self.root_dispersion = 0
+        self.ref_id = 0
+        self.ref_timestamp = 0
+        self.originate_timestamp = originate_time
+        self.recive_timestamp = recive_time
+        self.transmit_timestamp = 0
 
     def parse_package(self, data):
         try:
@@ -93,13 +122,13 @@ class SNTPpack():
             unpacked = struct.unpack('!4B3L4Q', data[:size])
             self.LI, self.VN, self.mode = self.parse_first_byte(unpacked[0])
             self.transmit_timestamp = struct.unpack('!Q', data[40:48])[0]
-            a = 23
         except BaseException:
             print('Invalid SNTP-packet format')
 
     def parse_first_byte(self, num):
         """ Разбираем побитово первый байт """
-        b = bin(num)[2:].rjust(8, '0')  # переводим число в строку с "бинарным" видом '00011011'
+        # переводим число в строку с "бинарным" видом '00011011'
+        b = bin(num)[2:].rjust(8, '0')  
         li = int(b[:2], 2)      # первые 2 бита
         vn = int(b[2:5], 2)     # следующие 3 бита
         mode = int(b[5:], 2)    # оставшиеся 3 бита
@@ -112,28 +141,32 @@ class SNTPpack():
         start_of_package = f'{li}{vn}{mode}'
         first_byte = int(start_of_package, 2)
         self.transmit_timestamp = time.time() + self.delay
-        self.ref_timestamp = self.convert_time_to_sntp(self.transmit_timestamp)
-        sntp_recive_timestamp = self.convert_time_to_sntp(self.recive_timestamp)
+        self.ref_timestamp = self.convert_time_to_sntp(
+            self.transmit_timestamp)
+        sntp_recive_timestamp = self.convert_time_to_sntp(
+            self.recive_timestamp)
         transmit_timestamp = sntp_recive_timestamp + self.ref_timestamp
 
-        package = struct.pack('!4B3L2LQ4L', first_byte,     # LI + VN + MODE
-                                            self.stratum,   
-                                            self.poll,     
-                                            self.precision, 
-                                            self.root_delay,
-                                            self.root_dispersion, 
-                                            self.ref_id, 
-                                            *self.ref_timestamp, 
-                                            self.originate_timestamp,
-                                            *transmit_timestamp
-                                            )
+        package = struct.pack(
+            '!4B3L2LQ4L',
+            first_byte,  # LI + VN + MODE
+            self.stratum,
+            self.poll,
+            self.precision,
+            self.root_delay,
+            self.root_dispersion,
+            self.ref_id,
+            *self.ref_timestamp,
+            self.originate_timestamp,
+            *transmit_timestamp
+            )
         return package
 
     def num_to_bin(self, num, length):
         return bin(num)[2:].rjust(length, '0')
 
     def convert_time_to_sntp(self, time):
-        """ колдунство """
+        """ Перевод времени в sntp формат (поправка на +70 лет) """
         time_shift = 2208988800
         sec, mill_sec = str(time + time_shift).split('.')
         mill_sec = float('0.{}'.format(mill_sec)) * 2 ** 32

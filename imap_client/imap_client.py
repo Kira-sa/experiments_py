@@ -5,31 +5,35 @@ import re        # для получения размера письма рег�
 from imaplib import IMAP4, IMAP4_SSL
 from ssl import SSLError
 import email
-from email.header import decode_header
 from typing import List
 
 DEBUG = True
 
 if DEBUG:
     LOGIN = "fantom.krez@mail.ru"
-    PASSW = "0kSiWxCoLcFFeEoMF2Xr"  #"a1224364860"
+    PASSW = "0kSiWxCoLcFFeEoMF2Xr"  # "a1224364860"
     SERVER = 'imap.mail.ru'
 
 """
 Параметры:
- -h/--help   справка
- --ssl       разрешить использование ssl, если сервер поддерживает (по умолчанию не использовать)
+ -h/--help  справка
+ --ssl      разрешить использование ssl, если сервер 
+            поддерживает (по умолчанию не использовать)
  -s/--server адрес IMAP-сервера  (адрес[:порт], порт по умолчанию 143)
- -n N1 [N2]  диспазон писем
- -u/--user   Имя пользователя (пароль спросить после запуска)
+ -n N1 [N2] диспазон писем
+ -u/--user  Имя пользователя (пароль спросить после запуска)
 """
 
 def get_args():
     """ Проверка входных аргументов """
-    parser = argparse.ArgumentParser(description='Еще один не нужный миру почтовый клиент')
-    parser.add_argument('-s', '--server', type=str,  help='Адрес IMAP-сервера  (адрес[:порт])')
-    parser.add_argument('-n', type=int, nargs='*', default=['-1'],  help='Выбрать диапазон писем')
-    parser.add_argument('--ssl', action="store_true", help='Разрешить использование ssl')
+    parser = argparse.ArgumentParser(description='Еще один не нужный \
+        миру почтовый клиент')
+    parser.add_argument('-s', '--server', type=str, 
+        help='Адрес IMAP-сервера  (адрес[:порт])')
+    parser.add_argument('-n', type=int, nargs='*', default=['-1'],  
+        help='Выбрать диапазон писем')
+    parser.add_argument('--ssl', action="store_true", 
+        help='Разрешить использование ssl')
     parser.add_argument('-u', '--user', type=str, help='Логин пользователя')
 
     return parser.parse_args().__dict__
@@ -111,10 +115,13 @@ class IMAPClient:
     def formatter(self, letter) -> str:
         """ Подготовка письма для печати (с вложениями если они есть) """
         msg_from, msg_to, subject, date_time, msg_size, attaches = letter
-        result = "From: {:35}  To: {:20}  Subject: {:30}  Date: {:15}  Size: {:4}  Attaches: {:3}".format(msg_from, msg_to, subject, date_time, msg_size, len(attaches))
+        result = "From: {:35}  To: {:20}  Subject: {:30}  Date: {:15} \
+            Size: {:4}  Attaches: {:3}".format(
+            msg_from, msg_to, subject, date_time, msg_size, len(attaches))
         att = []
         for i in range(len(attaches)):
-            s = "\n\t\tFilename: {:40}   File size: {:10}".format(attaches[i]['name'], attaches[i]['size'])
+            s = "\n\t\tFilename: {:40}   File size: {:10}".format(
+                attaches[i]['name'], attaches[i]['size'])
             att.append(s)
         return result + ''.join(att)
 
@@ -130,8 +137,7 @@ class IMAPClient:
 
     def process_letter(self, mailbox, message_id):
         """ Получение письма по id от сервера """
-        message_id_str = message_id.decode('utf-8')
-        # print("Fetching message {} of {}".format(message_id_str, messages_count))
+        # message_id_str = message_id.decode('utf-8')
         letter = self.get_letter(mailbox, message_id)
         print(self.formatter(letter))
 
@@ -139,15 +145,17 @@ class IMAPClient:
         """ Получение письма по id, декодирование,
         разбор по компонентам """
         status, data = mailbox.fetch(id, '(RFC822)')
-        msg_size = int(re.findall('(?<=\{)(.*?)(?=\})', data[0][0].decode())[0])  # получаем размер письма
-        msg = email.message_from_bytes(data[0][1], _class = email.message.EmailMessage)  # парсим письмо
+        msg_size = int(re.findall('(?<=\{)(.*?)(?=\})', 
+            data[0][0].decode())[0])  # получаем размер письма
+        msg = email.message_from_bytes(data[0][1], 
+            _class = email.message.EmailMessage)  # парсим письмо
         raw_msg_to = msg['To']  # Кому
         raw_msg_from = msg['From']  # От кого
         raw_sub = msg['Subject']  # Заголовок письма
         msg_to = dd(raw_msg_to)
         msg_from = dd(raw_msg_from)
         subject = dd(raw_sub)
-        timestamp = email.utils.parsedate_tz(msg['Date'])  # Время отправления (списком)
+        timestamp = email.utils.parsedate_tz(msg['Date'])  # Время отправления
         YY, MM, DD, hh, mm, ss = timestamp[:6]
         date_time = f'{hh}:{mm} {DD}.{MM}.{YY}'
         # msg_size = 0  # размер письма в байтах
@@ -161,7 +169,6 @@ class IMAPClient:
             if bool(fileName):
                 size = len(part.get_payload(decode=True))
                 attaches.append({'name':fileName, 'size':size})
-        attaches_count = len(attaches)
 
         return msg_from, msg_to, subject, date_time, msg_size, attaches
 

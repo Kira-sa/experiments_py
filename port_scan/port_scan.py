@@ -15,15 +15,11 @@ UDP 123 SNTP
 
 
 import argparse  # для разбора аргументов
-import sys
 import socket
-# from socket import AF_INET, SOCK_STREAM, SOCK_DGRAM, socket, timeout
 import threading 
-from datetime import datetime, time
 from traceback import print_exc
-import re
 from typing import List, Tuple
-from threading import Lock, Thread
+from threading import Lock
 from queue import Queue
 
 import struct
@@ -38,8 +34,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Yet another port scanner')
     parser.add_argument('-t', '--tcp', action='store_true', help='Scan TCP')
     parser.add_argument('-u', '--udp', action='store_true', help='Scan UDP')
-    parser.add_argument('host', type=str, default=['8.8.8.8'], help='Remote host')
-    parser.add_argument('-p', '--ports', type=int, nargs=2, default=['1', '65535'], help='Define port range')
+    parser.add_argument('host', type=str, default=['8.8.8.8'], 
+        help='Remote host')
+    parser.add_argument('-p', '--ports', type=int, nargs=2, 
+        default=['1', '65535'], help='Define port range')
     return parser.parse_args().__dict__
 
 
@@ -48,18 +46,21 @@ def validate_ports(port_range: list) -> Tuple[int, int]:
         (номер первого порта меньше второго и оба номера 
         расположены в диапазоне допустимых значений) """
     a, b = port_range
-    return (a, b) if (a < b and 1 < a < 65535 and 1 < b < 65535) else (None, None)
+    valid = a < b and 1 < a < 65535 and 1 < b < 65535
+    return (a, b) if valid else (None, None)
 
 
 def scan(tcp: bool, udp: bool, host: str, ports: List[str]):
     port_start, port_end = validate_ports(ports)
     if port_start:
-        scanner = Scanner(tcp, udp, host, port_start, port_end, TIMEOUT, THREADS)
+        scanner = Scanner(tcp, udp, host, port_start, port_end, 
+            TIMEOUT, THREADS)
         scanner.run()
 
 
 class Scanner:
-    def __init__(self, tcp, udp, host: str, port_start: int, port_end: int, timeout=1.0, threadcount=10):
+    def __init__(self, tcp, udp, host: str, port_start: int, 
+                port_end: int, timeout=1.0, threadcount=10):
         self.tcp = tcp
         self.udp = udp
         self.host = host
@@ -70,22 +71,22 @@ class Scanner:
         self._lock = Lock()
         self._condition = threading.Condition(self._lock)
         self._ports_active = []
-        self._ports_being_checked = []  # перечень проверяемых портов в текущий момент
+        # перечень проверяемых портов в текущий момент
+        self._ports_being_checked = []
         self._next_port = port_start
         self._last_port = port_end
 
     def run(self):
         try:
             while True:
-                self._condition.acquire()  # блокируем, во имя избежания коллизий
+                self._condition.acquire()  # блокируем
                 while len(self._ports_being_checked) >= self.threadcount:
-                    # все потоки заняты работой, ждем пока кто-нибудь освободится
+                    # ждем если все потоки заняты работой
                     self._condition.wait()
                 slots_available = self.threadcount - len(self._ports_being_checked)
                 self._condition.release()  # снимаем блокировку
                 if self._next_port > self._last_port:
                     return
-                # print ("Checking {} - {}".format(self._next_port, self._next_port+slots_available))    
                 for i in range(slots_available):  # запустить пачку потоков
                     self.start_another_thread()
         except AllThreadsStarted as ex:
@@ -123,33 +124,38 @@ class Scanner:
 
     def check_tcp(self, port):
         """ Если удалось подключиться значит порт доступен/открыт """
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
+        # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
         s.settimeout(self.timeout)
         reply = ''
         try:
-            resp = s.connect_ex((self.host, port))  # тот же connect, но с ошибкой если она была (0 если всё ОК)
+            resp = s.connect_ex((self.host, port))  # 0 если всё ОК
             if resp!=0:
                 # Вывод инфо если подключение не удалось (по разным причинам)
                 # with self._lock:
                     # print("Ошибка при подключении к порту {}".format(port))
                 return
+            # если к сокет удалось открыть то послушает, 
+            # может что-нибудь скажет
+            reply_raw = s.recv(4096)  
+            try: 
+                # попробуем привести сообщение в осмысленный вид
+                reply = str(reply_raw.decode('utf-8'))  
 
-            reply_raw = s.recv(4096)  # если к сокет удалось открыть то послушает, может что-нибудь скажет
-            try:  
-                reply = str(reply_raw.decode('utf-8'))  # попробуем привести сообщение в осмысленный вид
-
-            except UnicodeDecodeError:  # Полученное сообщение не удалось декодировать в utf-8
+            except UnicodeDecodeError:  # Сообщение не удалось декодировать в utf-8
                 # with self._lock:
                 #     print("{}".format(reply_raw))
                 pass
-            except socket.timeout:  
-                s.send(f'GET / HTTP/1.1\n\n'.encode())  # если по таймауту ничего не сказал - спросим сами
+            except socket.timeout: 
+                # если по таймауту ничего не сказал - спросим сами
+                s.send(f'GET / HTTP/1.1\n\n'.encode())  
                 reply = s.recv(4096).decode('utf-8')
             
             protocol = self.get_protocol(reply, port, "tcp")
             with self._lock:
                 self._ports_active.append(port)
-                # print ("Found active port  TCP: {}  Protocol: {}".format(port, protocol))
+                # print ("Found active port  TCP: {} \
+                # Protocol: {}".format(port, protocol))
                 print ("TCP: {}  Protocol: {}".format(port, protocol))
             s.close()
 
