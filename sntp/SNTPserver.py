@@ -46,7 +46,9 @@ class SNTPserver:
                         stratum=3,
                         version=4,  # request.version,
                         mode=4,  # 4 - сервер, 3 - клиент
+                        # время клиента
                         originate_time=request.transmit_timestamp,
+                        # время сервера + дельта
                         recive_time=recive_time + self.delay
                         )
 
@@ -98,7 +100,9 @@ class SNTPpack():
         'broadcast': 5
         }
 
-    def __init__(self, delay, stratum, version, mode, originate, recive):
+    def __init__(
+        self, delay=0, stratum=3, version=4, mode=4, originate_time=0, 
+        recive_time=0):
         """ https://labs.apnic.net/?p=462 - описание протокола NTP """
         self.delay = delay  # настраиваемая зарержка/опережение
         self.LI = 0
@@ -111,8 +115,8 @@ class SNTPpack():
         self.root_dispersion = 0
         self.ref_id = 0
         self.ref_timestamp = 0
-        self.originate_timestamp = originate
-        self.recive_timestamp = recive
+        self.originate_timestamp = originate_time  # время клиента
+        self.recive_timestamp = recive_time  # время сервера + дельта
         self.transmit_timestamp = 0
 
     def parse_package(self, data):
@@ -121,7 +125,11 @@ class SNTPpack():
             size = struct.calcsize('!4B3L4Q')
             unpacked = struct.unpack('!4B3L4Q', data[:size])
             self.LI, self.VN, self.mode = self.parse_first_byte(unpacked[0])
+            self.ref_timestamp = struct.unpack('!Q', data[16:24])[0]
+            # self.originate_timestamp = struct.unpack('!Q', data[24:32])[0]
+            # self.recive_timestamp = struct.unpack('!Q', data[32:40])[0]
             self.transmit_timestamp = struct.unpack('!Q', data[40:48])[0]
+            # print(self.transmit_timestamp)
         except BaseException:
             print('Invalid SNTP-packet format')
 
@@ -140,12 +148,10 @@ class SNTPpack():
         mode = self.num_to_bin(self.mode, 3)
         start_of_package = '{}{}{}'.format(li, vn, mode)
         first_byte = int(start_of_package, 2)
+
         self.transmit_timestamp = time.time() + self.delay
-        self.ref_timestamp = self.convert_time_to_sntp(
-            self.transmit_timestamp)
-        sntp_recive_timestamp = self.convert_time_to_sntp(
-            self.recive_timestamp)
-        transmit_timestamp = sntp_recive_timestamp + self.ref_timestamp
+        self.ref_timestamp = self.convert_time_to_sntp(self.transmit_timestamp)
+        sntp_recive_timestamp = self.convert_time_to_sntp(self.recive_timestamp)
 
         package = struct.pack(
             '!4B3L2LQ4L',
@@ -156,9 +162,14 @@ class SNTPpack():
             self.root_delay,
             self.root_dispersion,
             self.ref_id,
-            *self.ref_timestamp,
-            self.originate_timestamp,
-            *transmit_timestamp
+            # время отправки пакета + дельта (по идее здесь должно быть время 
+            # последней коррекции, и вроде как клиенту на это поле фиолетово,
+            # поэтому впишем нули - всё равно работает)
+            # *self.ref_timestamp,  
+            0, 0,
+            self.originate_timestamp,  # время клиента из запроса
+            *sntp_recive_timestamp,  # время получения пакета сервером
+            *self.ref_timestamp  # время отправки пакета + дельта
             )
         return package
 
