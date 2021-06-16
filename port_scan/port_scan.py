@@ -172,11 +172,11 @@ class Scanner:
         res = ""
         if self._is_dns(s, port):
             res = "DNS"
-        elif self._is_http(s):
+        elif protocol=='tcp' and self._is_http(s):
             res = "HTTP"
-        elif self._is_smtp(s):
+        elif protocol=='tcp' and self._is_smtp(s):
             res = "SMTP"
-        elif self._is_ntp(s):
+        elif protocol=='udp' and self._is_ntp(s):
             res = "NTP"
         elif protocol=='tcp' and self._is_pop3(s, port):
             res = "POP3"
@@ -270,12 +270,11 @@ class Scanner:
         return False
 
     def _is_ntp(self, s):
-        return False
-        req = "GET / HTTP/1.1\r\n\r\n".encode()
-        s.send(req)
+        packet = bytearray(48)
+        packet[0] = 0b11100011
+        s.send(packet)
         response = s.recv(2048)
-        # http_response = repr(response)
-        if 'HTTP/1.1' in response:
+        if len(response) > 0:
             return True
         else:
             return False
