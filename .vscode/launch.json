@@ -65,6 +65,7 @@
             "args": [
                 "--server",
                 // "imap.mail.ru:993",
+                // "94.100.180.90:993",
                 "94.100.180.90:993",
                 "--user",
                 "fantom.krez@mail.ru",

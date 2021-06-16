@@ -58,18 +58,12 @@ class IMAPClient:
         self.ssl = ssl
         server_buf = server.split(":")
         self.server = server_buf[0]
+        self.port = 143
         try:
             self.port = int(server_buf[1])
         except Exception:
-            self.port = 143
+            pass
         self.user = user
-        a = len(n) == 0
-        b = len(n) > 2
-        c = len(n) == 2 and (
-            int(n[0]) > int(n[1]) or int(n[0]) < 0 or int(n[1]) < 0)
-        if a or b or c:
-            print('Указан некорректный интервал')
-            return
         self.interval = n
 
     def run(self):
@@ -199,4 +193,3 @@ def dd(data):
 
 if __name__ == "__main__":
     IMAPClient(**get_args()).run()
-    s = 23
