@@ -17,24 +17,38 @@ if DEBUG:
 """
 Параметры:
  -h/--help  справка
- --ssl      разрешить использование ssl, если сервер 
+ --ssl      разрешить использование ssl, если сервер
             поддерживает (по умолчанию не использовать)
  -s/--server адрес IMAP-сервера  (адрес[:порт], порт по умолчанию 143)
  -n N1 [N2] диспазон писем
  -u/--user  Имя пользователя (пароль спросить после запуска)
 """
 
+
 def get_args():
     """ Проверка входных аргументов """
     parser = argparse.ArgumentParser(description='Еще один не нужный \
         миру почтовый клиент')
-    parser.add_argument('-s', '--server', type=str, 
-        help='Адрес IMAP-сервера  (адрес[:порт])')
-    parser.add_argument('-n', type=int, nargs='*', default=['-1'],  
-        help='Выбрать диапазон писем')
-    parser.add_argument('--ssl', action="store_true", 
-        help='Разрешить использование ssl')
-    parser.add_argument('-u', '--user', type=str, help='Логин пользователя')
+    parser.add_argument(
+        '-s', '--server',
+        type=str,
+        help='Адрес IMAP-сервера  (адрес[:порт])'
+        )
+    parser.add_argument(
+        '-n', type=int,
+        nargs='*', default=['-1'],
+        help='Выбрать диапазон писем'
+        )
+    parser.add_argument(
+        '--ssl',
+        action="store_true",
+        help='Разрешить использование ssl'
+        )
+    parser.add_argument(
+        '-u', '--user',
+        type=str,
+        help='Логин пользователя'
+        )
 
     return parser.parse_args().__dict__
 
@@ -46,19 +60,20 @@ class IMAPClient:
         self.server = server_buf[0]
         try:
             self.port = int(server_buf[1])
-        except:
+        except Exception:
             self.port = 143
         self.user = user
         a = len(n) == 0
         b = len(n) > 2
-        c = len(n) == 2 and (int(n[0]) > int(n[1]) or int(n[0]) < 0 or int(n[1]) < 0)
+        c = len(n) == 2 and (
+            int(n[0]) > int(n[1]) or int(n[0]) < 0 or int(n[1]) < 0)
         if a or b or c:
             print('Указан некорректный интервал')
             return
         self.interval = n
 
     def run(self):
-        print(f"Подключение к серверу: {self.server}")
+        print("Подключение к серверу: {}".format(self.server))
         try:
             if self.ssl:
                 mailbox = IMAP4_SSL(self.server, port=self.port)
@@ -73,18 +88,20 @@ class IMAPClient:
         except IMAP4.error as er:
             print("Ошибка подключения к серверу ({})".format(str(er)[2:-1]))
             return
-        print(f"Подключено. Пользователь: {self.user}...")
+        print("Подключено. Пользователь: {}...".format(self.user))
         passw = getpass.getpass("Введите пароль: ")
         try:
             mailbox.login(self.user, passw)
         except IMAP4.error as er:
             print("Ошибка авторизации ({})".format(str(er)[2:-1]))
             return
-            
+
         print("Авторизация прошла успешно. Считываем сообщения.")
-        status, select_data = mailbox.select('INBOX')  # status=='OK'
-        messages_count = select_data[0].decode('utf-8')  # количество писем во входящих
-        status, search_data = mailbox.search(None, 'ALL')  # получаем список id писем
+        mailbox.select('INBOX')  # Выбираем каталог каталог
+        # количество писем во входящих
+        # messages_count = select_data[0].decode('utf-8')
+        # получаем список id писем
+        status, search_data = mailbox.search(None, 'ALL')
 
         all_id = search_data[0].split()
         if not self.check_interval(all_id):
@@ -97,9 +114,11 @@ class IMAPClient:
         else:
             if len(self.interval) == 1:
                 for message_id in all_id:
-                    if int(message_id) < self.interval[0]:  # от указанного до конца
+                    # от указанного до конца
+                    if int(message_id) < self.interval[0]:
                         continue
-                    # if message_id >= start_id:  # от первого до указанного
+                    # от первого до указанного
+                    # if message_id >= start_id:
                         # return
                     self.process_letter(mailbox, message_id)
             else:
@@ -145,10 +164,10 @@ class IMAPClient:
         """ Получение письма по id, декодирование,
         разбор по компонентам """
         status, data = mailbox.fetch(id, '(RFC822)')
-        msg_size = int(re.findall('(?<=\{)(.*?)(?=\})', 
-            data[0][0].decode())[0])  # получаем размер письма
-        msg = email.message_from_bytes(data[0][1], 
-            _class = email.message.EmailMessage)  # парсим письмо
+        # получаем размер письма
+        msg_size = int(re.findall('(?<={)(.*?)(?=})', data[0][0].decode())[0])
+        msg = email.message_from_bytes(
+            data[0][1], _class=email.message.EmailMessage)  # парсим письмо
         raw_msg_to = msg['To']  # Кому
         raw_msg_from = msg['From']  # От кого
         raw_sub = msg['Subject']  # Заголовок письма
@@ -157,7 +176,7 @@ class IMAPClient:
         subject = dd(raw_sub)
         timestamp = email.utils.parsedate_tz(msg['Date'])  # Время отправления
         YY, MM, DD, hh, mm, ss = timestamp[:6]
-        date_time = f'{hh}:{mm} {DD}.{MM}.{YY}'
+        date_time = '{}:{} {}.{}.{}'.format(hh, mm, DD, MM, YY)
         # msg_size = 0  # размер письма в байтах
         attaches = []
         for part in msg.walk():
@@ -168,7 +187,7 @@ class IMAPClient:
             fileName = part.get_filename()
             if bool(fileName):
                 size = len(part.get_payload(decode=True))
-                attaches.append({'name':fileName, 'size':size})
+                attaches.append({'name': fileName, 'size': size})
 
         return msg_from, msg_to, subject, date_time, msg_size, attaches
 
@@ -178,7 +197,6 @@ def dd(data):
     return str(email.header.make_header(email.header.decode_header(data)))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     IMAPClient(**get_args()).run()
     s = 23
-

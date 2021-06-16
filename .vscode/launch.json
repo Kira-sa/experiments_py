@@ -5,6 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: SNTP",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                "-d",
+                "30"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python: scan ports",
             "type": "python",
             "request": "launch",
@@ -30,7 +41,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python: с аргументами",
+            "name": "Python: imap test",
             "type": "python",
             "request": "launch",
             "program": "${file}",

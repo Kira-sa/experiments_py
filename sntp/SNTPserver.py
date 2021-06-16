@@ -2,7 +2,7 @@ import queue
 import time
 import select
 import struct
-import sys
+# import sys
 import threading
 
 
@@ -18,8 +18,8 @@ class SNTPserver:
         self.task = queue.Queue()
 
     def run(self):
-        """ Поднять сервер, 
-            слушать подключения/запросы, 
+        """ Поднять сервер,
+            слушать подключения/запросы,
             врать в ответ
         """
         print("SNTP server start")
@@ -34,7 +34,7 @@ class SNTPserver:
             ready_to_read, _, _ = select.select([self.sock], [], [], timeout)
             if ready_to_read:
                 self.add_task(ready_to_read)
-    
+
     def add_task(self, ready_to_read):
         for client in ready_to_read:
             pack_sntp, addr = client.recvfrom(1024)
@@ -42,10 +42,10 @@ class SNTPserver:
             self.task.put((pack_sntp, addr, time.time()))
 
     def prepare_response(self, request, recive_time):
-        return SNTPpack(self.delay, 
-                        stratum=3, 
-                        version=4, #request.version, 
-                        mode=4, # 4 - сервер, 3 - клиент
+        return SNTPpack(self.delay,
+                        stratum=3,
+                        version=4,  # request.version,
+                        mode=4,  # 4 - сервер, 3 - клиент
                         originate_time=request.transmit_timestamp,
                         recive_time=recive_time + self.delay
                         )
@@ -60,15 +60,15 @@ class SNTPserver:
                 req, req_addr, req_time = self.task.get(timeout=1)
                 request = SNTPpack()
                 request.parse_package(req)  # разбираем запрос клиента
-                response = self.prepare_response(request, 
-                    req_time).create_package() # готовим ответ
+                response = self.prepare_response(
+                    request, req_time).create_package()  # готовим ответ
                 self.sock.sendto(response, req_addr)  # отправляем
             except queue.Empty:
                 continue
 
 
 class SNTPpack():
-    """ 
+    """
     Leap Indicator - индикатор коррекции
     Version Number (3 bits) - номер версии, в настоящее время = 4
     mode - NTP packet mode
@@ -78,27 +78,27 @@ class SNTPpack():
     root_delay - задержка
     root_dispersion - дисперсия
     Reference Identifier - идентификатор источника
-    ref_timestamp - время обновления (This field is the time the system clock 
+    ref_timestamp - время обновления (This field is the time the system clock
         was last set or corrected, in 64-bit time-stamp format.)
-    originate_timestamp - начальное время (This value is the time at which the 
-        request departed the client for the server, in 64-bit time-stamp 
+    originate_timestamp - начальное время (This value is the time at which the
+        request departed the client for the server, in 64-bit time-stamp
         format.)
-    recive_timestamp - время приема (This value is the time at which the 
+    recive_timestamp - время приема (This value is the time at which the
         client request arrived at the server in 64-bit time-stamp format.)
-    transmit_timestamp - время отправки (This value is the time at which the 
+    transmit_timestamp - время отправки (This value is the time at which the
         server reply departed the server, in 64-bit time-stamp format.)
     """
 
     SNTP_MODE = {
-        'reserved': 0, 
-        'symmetry active':1, 
-        'symmetry passive':2, 
-        'client': 3, 
-        'server': 4, 
+        'reserved': 0,
+        'symmetry active': 1,
+        'symmetry passive': 2,
+        'client': 3,
+        'server': 4,
         'broadcast': 5
         }
 
-    def __init__(self, delay=0, stratum=3, version=4, mode=4, originate_time=0, recive_time=0):
+    def __init__(self, delay, stratum, version, mode, originate, recive):
         """ https://labs.apnic.net/?p=462 - описание протокола NTP """
         self.delay = delay  # настраиваемая зарержка/опережение
         self.LI = 0
@@ -111,8 +111,8 @@ class SNTPpack():
         self.root_dispersion = 0
         self.ref_id = 0
         self.ref_timestamp = 0
-        self.originate_timestamp = originate_time
-        self.recive_timestamp = recive_time
+        self.originate_timestamp = originate
+        self.recive_timestamp = recive
         self.transmit_timestamp = 0
 
     def parse_package(self, data):
@@ -128,7 +128,7 @@ class SNTPpack():
     def parse_first_byte(self, num):
         """ Разбираем побитово первый байт """
         # переводим число в строку с "бинарным" видом '00011011'
-        b = bin(num)[2:].rjust(8, '0')  
+        b = bin(num)[2:].rjust(8, '0')
         li = int(b[:2], 2)      # первые 2 бита
         vn = int(b[2:5], 2)     # следующие 3 бита
         mode = int(b[5:], 2)    # оставшиеся 3 бита
@@ -138,7 +138,7 @@ class SNTPpack():
         li = self.num_to_bin(self.LI, 2)
         vn = self.num_to_bin(self.VN, 3)
         mode = self.num_to_bin(self.mode, 3)
-        start_of_package = f'{li}{vn}{mode}'
+        start_of_package = '{}{}{}'.format(li, vn, mode)
         first_byte = int(start_of_package, 2)
         self.transmit_timestamp = time.time() + self.delay
         self.ref_timestamp = self.convert_time_to_sntp(
