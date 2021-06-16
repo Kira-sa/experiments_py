@@ -22,6 +22,7 @@ from typing import List, Tuple
 from threading import Lock
 from queue import Queue
 from imaplib import IMAP4, IMAP4_SSL
+import poplib
 
 import struct
 import random
@@ -177,7 +178,7 @@ class Scanner:
             res = "SMTP"
         elif protocol == 'udp' and self._is_ntp(s):
             res = "NTP"
-        elif protocol == 'tcp' and self._is_pop3(s, port):
+        elif protocol == 'tcp' and self._is_pop3(port):
             res = "POP3"
         elif protocol == 'tcp' and self._is_imap_ssl(port):
             res = "IMAP_SSL"
@@ -230,11 +231,11 @@ class Scanner:
         try:
             req = "GET / HTTP/1.1\r\n\r\n".encode()
             s.send(req)
-            response = s.recv(2048)
+            response = s.recv(2048).decode()
         except Exception:
             return False
 
-        if 'HTTP/1.1' in response:
+        if 'HTTP' in response:
             return True
         return False
 
@@ -267,20 +268,13 @@ class Scanner:
         else:
             return False
 
-    def _is_pop3(self, s, port):
+    def _is_pop3(self, port):
         """ pop3 ответы всегда начинаются с '+OK' """
         try:
-            response = s.recv(2048)
-            if 'OK' in response[:3]:
-                return True
-            else:
-                resp = s.send(b'USER test\r\n')
+            M = poplib.POP3(self.host)
+            return True
         except Exception:
             return False
-
-        if 'OK' in resp:
-            return True
-        return False
 
     def _is_imap_ssl(self, port):
         try:
