@@ -23,6 +23,7 @@ from threading import Lock
 from queue import Queue
 from imaplib import IMAP4, IMAP4_SSL
 import poplib
+from smtplib import SMTP_SSL
 
 import struct
 import random
@@ -174,7 +175,7 @@ class Scanner:
             res = "DNS"
         elif protocol == 'tcp' and self._is_http(s):
             res = "HTTP"
-        elif protocol == 'tcp' and self._is_smtp(s):
+        elif protocol == 'tcp' and self._is_smtp(s, port):
             res = "SMTP"
         elif protocol == 'udp' and self._is_ntp(s):
             res = "NTP"
@@ -239,23 +240,14 @@ class Scanner:
             return True
         return False
 
-    def _is_smtp(self, s):
+    def _is_smtp(self, s, port):
         """ А может SMTP """
         try:
-            recv = s.recv(1024)
-            if len(recv) == 0:
-                return False
-            if recv[:3] != '220':  # не получен код SMTP Service ready
-                return False
-            heloCommand = 'HELO test.com\r\n'.encode()
-            s.send(heloCommand)
-            recv1 = s.recv(1024)
+            with SMTP_SSL(host=self.host, port=port) as smtp:
+                smtp.noop()
         except Exception:
             return False
-
-        if recv1[:3] == '250':  # Requested mail action okay
-            return True
-        return False
+        return True
 
     def _is_ntp(self, s):
         """ А может NTP """
