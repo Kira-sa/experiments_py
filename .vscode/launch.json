@@ -5,6 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Scan ports - test imap",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                "--tcp",
+                "--udp",
+                "94.100.180.90",
+                "--ports",
+                "993",
+                "1000"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python: SNTP",
             "type": "python",
             "request": "launch",
@@ -47,7 +62,8 @@
             "program": "${file}",
             "args": [
                 "--server",
-                "imap.mail.ru:993",
+                // "imap.mail.ru:993",
+                "94.100.180.90:993",
                 "--user",
                 "fantom.krez@mail.ru",
                 "--ssl",

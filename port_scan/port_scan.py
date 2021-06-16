@@ -21,13 +21,15 @@ from traceback import print_exc
 from typing import List, Tuple
 from threading import Lock
 from queue import Queue
+from imaplib import IMAP4, IMAP4_SSL
+from ssl import SSLError
 
 import struct
 import random
 
 
 TIMEOUT = 3
-THREADS = 10
+THREADS = 5
 
 
 def parse_args():
@@ -135,73 +137,79 @@ class Scanner:
         # socket.AF_INET - Семейство сокетов IPv4, socket.SOCK_STREAM - TCP
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(self.timeout)
-        reply = ''
         try:
             resp = s.connect_ex((self.host, port))  # 0 если всё ОК
-            if resp != 0:
-                # Вывод инфо если подключение не удалось (по разным причинам)
-                # with self._lock:
-                #    print("Ошибка при подключении к порту {}".format(port))
+            if resp != 0:  # подключение не удалось
                 return
-            # если к сокет удалось открыть то послушает,
-            # может что-нибудь скажет
-            reply_raw = s.recv(4096)
-            try:
-                # попробуем привести сообщение в осмысленный вид
-                reply = str(reply_raw.decode('utf-8'))
-
-            except UnicodeDecodeError:  # Сообщение не удалось декодировать
-                # with self._lock:
-                #     print("{}".format(reply_raw))
-                pass
-            except socket.timeout:
-                # если по таймауту ничего не сказал - спросим сами
-                s.send('GET / HTTP/1.1\n\n'.encode())
-                reply = s.recv(4096).decode('utf-8')
-
-            protocol = self.get_protocol(reply, port, "tcp")
+            protocol = self.check_socket_protocol(s, port, 'tcp')
             with self._lock:
                 self._ports_active.append(port)
-                # print ("Found active port  TCP: {} \
-                # Protocol: {}".format(port, protocol))
-                print("TCP: {}  Protocol: {}".format(port, protocol))
-            s.close()
-
-        except socket.timeout:  # таймаут
+                print("TCP: {} {}".format(port, protocol))
+        except socket.timeout:
             return
-        # возможные ошибки при использовании s.connect(),
-        # бесполезно при s.connect_ex()
-        # except ConnectionRefusedError:  # сервер отклонил подключение
-        #     return
-        # except ConnectionResetError:  # сервер сбросил подключение
-        #     return
+        finally:
+            s.close()
 
     def check_udp(self, port):
         """ Если удалось подключиться значит порт доступен/открыт """
-        reply = ''
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(self.timeout)
-        # pkg = self._build_packet()
-        resp = s.connect_ex((self.host, port))
-        if resp != 0:  # подключение не прошло
-            return
         try:
-            # a = s.sendto(pkg, (self.host, port))
-            s.sendto(b"Hello world!", (self.host, port))
-            reply = s.recv(1024)
+            resp = s.connect_ex((self.host, port))
+            if resp != 0:  # подключение не удалось
+                return
+            protocol = self.check_socket_protocol(s, port, 'udp')
+            with self._lock:
+                self._ports_active.append(port)
+                print('UDP {} {}'.format(port, protocol))
         except socket.timeout:
-            # print("Общения не удалось\n")
-            pass
-            # return
-        protocol = self.get_protocol(reply, port, "udp")
-        with self._lock:
-            self._ports_active.append(port)
-            # print(reply)
-            # print('Found active port  UDP {} {}'.format(port, protocol))
-            print('UDP {} {}'.format(port, protocol))
-        s.close()
+            return
+        finally:
+            s.close()
 
-    def _build_packet(self):
+    def check_socket_protocol(self, s, port, protocol):
+        """ Определяем протокол порта """
+        res = ""
+        if self._is_dns(s, port):
+            res = "DNS"
+        elif self._is_http(s):
+            res = "HTTP"
+        elif self._is_smtp(s):
+            res = "SMTP"
+        elif self._is_ntp(s):
+            res = "NTP"
+        elif protocol=='tcp' and self._is_pop3(s, port):
+            res = "POP3"
+        elif protocol=='tcp' and self._is_imap_ssl(port):
+            res = "IMAP_SSL"
+        elif protocol=='tcp' and self._is_imap_no_ssl(port):
+            res = "IMAP"
+        elif self._is_something(s, port):
+            res = "SOMETHING"
+        # если проверки ничего не показали
+        # покажем стандартный протокол порта (если есть)
+        else:
+            try:
+                res = "may be standart {}".format(
+                    socket.getservbyport(port, protocol).upper())
+            except Exception:
+                res = "Unknown"
+
+        return res
+
+    def _is_dns(self, s, port):
+        """ А может ДНС? """
+        try:
+            pkg = self._build_dns_packet()
+            s.sendto(pkg, (self.host, port))
+            response = s.recv(1024)
+        except Exception:
+            return False
+        if len(response) > 0:  # TODO: check response
+            return True
+        return False
+
+    def _build_dns_packet(self):
         url = 'www.google.com'
         randint = random.randint(0, 65535)
         packet = struct.pack(">H", randint)  # Query Ids (Just 1 for now)
@@ -220,31 +228,113 @@ class Scanner:
         packet += struct.pack(">H", 1)  # Query Class
         return packet
 
-    @staticmethod
-    def get_protocol(reply_in, port, protocol) -> str:
-        """
-        # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
-        #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
-        # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
-        """
-        reply = reply_in[:100]
+    def _is_something(self, s, port):
+        # s.sendto(b"Hello world!", (self.host, port))
         try:
-            # Вариант для определения по сигнатуре
-            if 'HTTP/1.1' in reply:
-                return 'looks like HTTP'
-            if 'SMTP' in reply:
-                return 'looks like SMTP'
-            if 'IMAP' in reply:
-                return 'looks like IMAP'
-            if 'OK' in reply:
-                return 'looks like POP3'
-            # Вариант для дефолтных портов
-            # (Может работать некорректно т.к. показывает какой
-            # обычно протокол работает на указанном порту, но ничего
-            # не мешает людям использовать почти любой другой для своих целей)
-            return socket.getservbyport(port, protocol).upper()
+            s.send(b"Hello world!")
+            response = s.recv(1024)
         except Exception:
-            return 'Unknown'
+            return False
+
+        if len(response) > 0:  # что-то ответило
+            return True
+        return False
+
+    def _is_http(self, s):
+        try:
+            req = "GET / HTTP/1.1\r\n\r\n".encode()
+            s.send(req)
+            response = s.recv(2048)
+        except Exception:
+            return False
+
+        if 'HTTP/1.1' in response:
+            return True
+        return False
+
+    def _is_smtp(self, s):
+        try:
+            recv = s.recv(1024)
+            if len(recv)==0:
+                return False
+            if recv[:3] != '220': # не получен код SMTP Service ready
+                return False
+            heloCommand = 'HELO test.com\r\n'.encode()
+            s.send(heloCommand)
+            recv1 = s.recv(1024)
+        except Exception:
+            return False
+
+        if recv1[:3] == '250': # Requested mail action okay
+            return True
+        return False
+
+    def _is_ntp(self, s):
+        return False
+        req = "GET / HTTP/1.1\r\n\r\n".encode()
+        s.send(req)
+        response = s.recv(2048)
+        # http_response = repr(response)
+        if 'HTTP/1.1' in response:
+            return True
+        else:
+            return False
+
+    def _is_pop3(self, s, port):
+        """ pop3 ответы всегда начинаются с '+OK' """
+        try:
+            response = s.recv(2048)
+            if 'OK' in response[:3]:
+                return True
+            else:
+                resp = s.send(b'USER test\r\n')
+        except Exception:
+            return False
+
+        if 'OK' in resp:
+            return True
+        return False
+
+    def _is_imap_ssl(self, port):
+        try:
+            mailbox = IMAP4_SSL(self.host, port=port)
+        except Exception:
+            return False
+        return True
+
+    def _is_imap_no_ssl(self, port):
+        try:
+            mailbox = IMAP4(self.host, port=port)
+        except Exception:
+            return False
+        return True
+
+    # устарело
+    # @staticmethod
+    # def get_protocol(reply_in, port, protocol) -> str:
+    #     """
+    #     # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
+    #     #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
+    #     # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
+    #     """
+    #     reply = reply_in[:100]
+    #     try:
+    #         # Вариант для определения по сигнатуре
+    #         if 'HTTP/1.1' in reply:
+    #             return 'looks like HTTP'
+    #         if 'SMTP' in reply:
+    #             return 'looks like SMTP'
+    #         if 'IMAP' in reply:
+    #             return 'looks like IMAP'
+    #         if 'OK' in reply:
+    #             return 'looks like POP3'
+    #         # Вариант для дефолтных портов
+    #         # (Может работать некорректно т.к. показывает какой
+    #         # обычно протокол работает на указанном порту, но ничего
+    #         # не мешает людям использовать почти любой другой для своих целей)
+    #         return socket.getservbyport(port, protocol).upper()
+    #     except Exception:
+    #         return 'Unknown'
 
 
 class AllThreadsStarted(Exception):

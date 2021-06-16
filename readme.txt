@@ -1,1 +1,1 @@
-test
+dns-chache - не реализовано
