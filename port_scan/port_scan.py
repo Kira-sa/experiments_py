@@ -22,7 +22,6 @@ from typing import List, Tuple
 from threading import Lock
 from queue import Queue
 from imaplib import IMAP4, IMAP4_SSL
-from ssl import SSLError
 
 import struct
 import random
@@ -172,20 +171,18 @@ class Scanner:
         res = ""
         if self._is_dns(s, port):
             res = "DNS"
-        elif protocol=='tcp' and self._is_http(s):
+        elif protocol == 'tcp' and self._is_http(s):
             res = "HTTP"
-        elif protocol=='tcp' and self._is_smtp(s):
+        elif protocol == 'tcp' and self._is_smtp(s):
             res = "SMTP"
-        elif protocol=='udp' and self._is_ntp(s):
+        elif protocol == 'udp' and self._is_ntp(s):
             res = "NTP"
-        elif protocol=='tcp' and self._is_pop3(s, port):
+        elif protocol == 'tcp' and self._is_pop3(s, port):
             res = "POP3"
-        elif protocol=='tcp' and self._is_imap_ssl(port):
+        elif protocol == 'tcp' and self._is_imap_ssl(port):
             res = "IMAP_SSL"
-        elif protocol=='tcp' and self._is_imap_no_ssl(port):
+        elif protocol == 'tcp' and self._is_imap_no_ssl(port):
             res = "IMAP"
-        elif self._is_something(s, port):
-            res = "SOMETHING"
         # если проверки ничего не показали
         # покажем стандартный протокол порта (если есть)
         else:
@@ -228,19 +225,8 @@ class Scanner:
         packet += struct.pack(">H", 1)  # Query Class
         return packet
 
-    def _is_something(self, s, port):
-        # s.sendto(b"Hello world!", (self.host, port))
-        try:
-            s.send(b"Hello world!")
-            response = s.recv(1024)
-        except Exception:
-            return False
-
-        if len(response) > 0:  # что-то ответило
-            return True
-        return False
-
     def _is_http(self, s):
+        """ А может HTTP """
         try:
             req = "GET / HTTP/1.1\r\n\r\n".encode()
             s.send(req)
@@ -253,11 +239,12 @@ class Scanner:
         return False
 
     def _is_smtp(self, s):
+        """ А может SMTP """
         try:
             recv = s.recv(1024)
-            if len(recv)==0:
+            if len(recv) == 0:
                 return False
-            if recv[:3] != '220': # не получен код SMTP Service ready
+            if recv[:3] != '220':  # не получен код SMTP Service ready
                 return False
             heloCommand = 'HELO test.com\r\n'.encode()
             s.send(heloCommand)
@@ -265,11 +252,12 @@ class Scanner:
         except Exception:
             return False
 
-        if recv1[:3] == '250': # Requested mail action okay
+        if recv1[:3] == '250':  # Requested mail action okay
             return True
         return False
 
     def _is_ntp(self, s):
+        """ А может NTP """
         packet = bytearray(48)
         packet[0] = 0b11100011
         s.send(packet)
@@ -307,33 +295,6 @@ class Scanner:
         except Exception:
             return False
         return True
-
-    # устарело
-    # @staticmethod
-    # def get_protocol(reply_in, port, protocol) -> str:
-    #     """
-    #     # TCP:  NTP, DNS, FTP, SSH, Telnet, SMTP,
-    #     #       HTTP, POP3, IMAP, SNTP, BGP, HTTPS, LDAPS, LDAPS
-    #     # UDP: DNS, TFTP, NTP, SNTP, LDAPS, LDAPS
-    #     """
-    #     reply = reply_in[:100]
-    #     try:
-    #         # Вариант для определения по сигнатуре
-    #         if 'HTTP/1.1' in reply:
-    #             return 'looks like HTTP'
-    #         if 'SMTP' in reply:
-    #             return 'looks like SMTP'
-    #         if 'IMAP' in reply:
-    #             return 'looks like IMAP'
-    #         if 'OK' in reply:
-    #             return 'looks like POP3'
-    #         # Вариант для дефолтных портов
-    #         # (Может работать некорректно т.к. показывает какой
-    #         # обычно протокол работает на указанном порту, но ничего
-    #         # не мешает людям использовать почти любой другой для своих целей)
-    #         return socket.getservbyport(port, protocol).upper()
-    #     except Exception:
-    #         return 'Unknown'
 
 
 class AllThreadsStarted(Exception):
@@ -381,33 +342,16 @@ if __name__ == "__main__":
             * настраивает сокет
             * пытается подключиться (s.connect_ex()), если удалось - половина
                 успеха
-                * пытается в обмен сообщениями, если удалось получить сообщение
-                    пробует его декодировать в utf-8 и проверить на предмет
-                    наличия специфичных для разного рода протоколов ключевых
-                    слов методом get_protocol()
-                * особо не важно удалось общение или нет, раз удалось
-                    подключиться, поэтому "аккуратно" записывает порт в список
-                    активных (self._ports_active) и также "аккуратно" выводит
-                    сообщение на экран
+                * пытается в обмен сообщениями методом check_socket_protocol()
 
             check_udp() - проверяет порт хоста
             * настраивает сокет
             * пытается подключиться (s.connect_ex()), если удалось - успех
-                * пытается в обмен сообщениями - почти всегда общение не
-                удастся, так как принимающий сервер вероятно просто
-                ===> фильтрует входящие пакеты <===
+                * пытается в обмен сообщениями - check_socket_protocol
+                    почти всегда общение не удастся, так как принимающий
+                    сервер вероятно просто
+                     ===> фильтрует входящие пакеты <===
                 * опять же "аккуратно" записывает порт в список активных
                     (self._ports_active)
                 * "аккуратно" выводит сообщение на экран
-                ** между делом использует метод _build_packet() для сборки
-                    кастом-пакета, оставлено было лишь с одной целью - чтобы
-                    было, особо это не нужно и кроме как при "общении" с одним
-                    из серверов гугла ("142.250.185.78") не применимо
-                    (кстати гугл как-то интересно откликался по этому адресу
-                     по udp, порт 53, который вроде DNS, так что не суть...)
-
-  get_protocol() - пытается в угадывание протокола
-    * в ифах - предположительно ключевые слова, который могут присутствовать
-        в ответах сервера, соответственно роли порта
-    * socket.getservbyport() - возвращает стандартную/дефолт роль порта
 """
