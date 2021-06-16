@@ -150,8 +150,10 @@ class SNTPpack():
         first_byte = int(start_of_package, 2)
 
         self.transmit_timestamp = time.time() + self.delay
-        self.ref_timestamp = self.convert_time_to_sntp(self.transmit_timestamp)
-        sntp_recive_timestamp = self.convert_time_to_sntp(self.recive_timestamp)
+        self.ref_timestamp = self.convert_time_to_sntp(
+            self.transmit_timestamp)
+        sntp_recive_timestamp = self.convert_time_to_sntp(
+            self.recive_timestamp)
 
         package = struct.pack(
             '!4B3L2LQ4L',
